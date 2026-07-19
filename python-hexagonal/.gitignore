@@ -1,0 +1,40 @@
+# Environment
+.env
+*.log
+
+# Byte-compiled
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# uv
+# (uv.lock IS committed — it pins the resolved graph. Do not ignore it.)
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Example data written by the JSON-file adapter demo
+notes.json
