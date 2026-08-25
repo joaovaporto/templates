@@ -6,8 +6,7 @@ class InMemoryNoteRepositoryAdapter(NoteRepositoryPort):
     """The default backend: a dict. No extra to install, nothing to run.
 
     Being a real adapter (not a test double) it belongs in `infrastructure/`, satisfies
-    the port structurally, and is the one the container builds when settings ask for
-    `memory`. Swap it for the JSON-file adapter by changing one env var; no other layer
+    the port structurally, and is the one built when settings ask for `memory`. Swap it for the JSON-file adapter by changing one env var; no other layer
     changes.
     """
 

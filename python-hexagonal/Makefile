@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-all lint format typecheck arch test test-unit coverage check clean
+.PHONY: help install install-dev install-all lint format typecheck arch test test-unit test-all coverage check explain clean
 
 help:
 	@echo "Install"
@@ -12,8 +12,12 @@ help:
 	@echo "  typecheck         mypy (strict)"
 	@echo "  arch              import-linter: the layer dependency rule"
 	@echo "  test-unit         offline unit suite"
+	@echo "  test-all          every extra installed, so no wiring case is skipped (use in CI)"
 	@echo "  coverage          unit suite, domain+application gated"
 	@echo "  check             lint + typecheck + arch + test-unit"
+	@echo ""
+	@echo "Inspect"
+	@echo "  explain           which adapter each port resolves to under the current settings"
 
 # --- Install -----------------------------------------------------------------
 
@@ -48,6 +52,11 @@ test:
 test-unit:
 	uv run pytest -m unit
 
+# Installs every extra, so the wiring test skips nothing. This is what CI should run.
+test-all:
+	uv sync --all-extras
+	uv run pytest
+
 coverage:
 	uv run pytest -m unit \
 		--cov=src/app/domain \
@@ -56,6 +65,9 @@ coverage:
 		--cov-fail-under=90
 
 check: lint typecheck arch test-unit
+
+explain:
+	uv run app-explain
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage

@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from app.application.errors import MissingDependencyError
 from app.application.ports.note_repository_port import NoteRepositoryPort
 from app.domain.entities.note import Note
 from app.domain.value_objects.title import Title
+from app.infrastructure.errors import MissingDependencyError
 
 
 class OrjsonNoteRepositoryAdapter(NoteRepositoryPort):

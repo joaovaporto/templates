@@ -7,7 +7,7 @@ class FakeNoteRepository(NoteRepositoryPort):
 
     It lives under `tests/`, not `infrastructure/`, on purpose: a fake is a testing
     artifact, not a production adapter. Because the use case depends on the port and not
-    on any adapter, this is all a unit test needs — no container, no settings, no I/O.
+    on any adapter, this is all a unit test needs — no resolver, no settings, no I/O.
     """
 
     def __init__(self) -> None:

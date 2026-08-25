@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from app.presentation.composition import conventions
+from app.presentation.settings import Settings
+
 pytestmark = pytest.mark.unit
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "app"
@@ -18,7 +21,9 @@ DOMAIN = SRC / "domain"
 APPLICATION = SRC / "application"
 INFRASTRUCTURE = SRC / "infrastructure"
 PRESENTATION = SRC / "presentation"
-COMPOSITION = SRC / "composition"
+COMPOSITION = PRESENTATION / "composition"
+
+INFRASTRUCTURE_PACKAGE = "app.infrastructure"
 
 
 def modules(root: Path) -> list[Path]:
@@ -68,8 +73,9 @@ class TestAdapters:
 class TestDtos:
     def test_every_dto_declares_its_direction(self) -> None:
         for path in modules(APPLICATION / "dtos"):
-            assert path.stem.endswith(("_input", "_output")), (
-                f"{path.name} must end with '_input' (toward the core) or '_output' (away from it)"
+            assert path.stem.endswith(("_input_dto", "_output_dto")), (
+                f"{path.name} must end with '_input_dto' (toward the core) or "
+                f"'_output_dto' (away from it)"
             )
 
 
@@ -82,3 +88,110 @@ class TestUseCases:
         for path in modules(APPLICATION / "usecases"):
             found = [c for c in classes_in(path) if c.endswith("UseCase")]
             assert len(found) == 1, f"{path.name} must define one use case, found {found}"
+
+
+class TestWiringNames:
+    """The names `Container.get()` reads to find an adapter."""
+
+    @staticmethod
+    def cores() -> set[str]:
+        """One per port, read from the filename: `note_repository_port.py` -> `note_repository`."""
+        return {path.stem.removesuffix("_port") for path in modules(APPLICATION / "ports")}
+
+    @staticmethod
+    def backends_implementing(core: str) -> list[str]:
+        return [
+            tech
+            for tech in conventions.techs(INFRASTRUCTURE_PACKAGE)
+            if conventions.adapter_modules(INFRASTRUCTURE_PACKAGE, tech, core)
+        ]
+
+    def test_every_adapter_module_names_a_known_port(self) -> None:
+        cores = self.cores()
+        for path in modules(INFRASTRUCTURE):
+            if not path.stem.endswith("_adapter"):
+                continue
+            assert any(conventions.implements(path.stem, core) for core in cores), (
+                f"{path.name} matches no port. Its stem must end with '_<port_core>_adapter' "
+                f"for one of: {', '.join(sorted(cores))}"
+            )
+
+    def test_the_tree_is_as_flat_as_resolution_assumes(self) -> None:
+        """A port and an adapter are found by listing one directory, never by walking.
+
+        Nesting either would leave it invisible to the resolver while every other rule
+        still passed, so the depth is a rule in its own right.
+        """
+        for path in modules(APPLICATION / "ports"):
+            assert path.parent == APPLICATION / "ports", (
+                f"{path.relative_to(SRC)} is nested; a port lives directly in application/ports/"
+            )
+        for path in modules(INFRASTRUCTURE):
+            if not path.stem.endswith("_adapter"):
+                continue
+            assert path.parent.parent == INFRASTRUCTURE, (
+                f"{path.relative_to(SRC)} is nested; an adapter lives directly in "
+                f"infrastructure/<backend>/, one level down and no deeper"
+            )
+
+    def test_every_port_has_at_least_one_adapter(self) -> None:
+        for core in sorted(self.cores()):
+            assert self.backends_implementing(core), (
+                f"No adapter implements '{core}'. Create "
+                f"src/app/infrastructure/<backend>/<library>_{core}_adapter.py"
+            )
+
+    def test_a_port_with_two_backends_declares_a_backend_setting(self) -> None:
+        for core in sorted(self.cores()):
+            backends = self.backends_implementing(core)
+            if len(backends) < 2:
+                continue
+            assert f"{core}_backend" in Settings.model_fields, (
+                f"'{core}' is implemented by {', '.join(backends)}. Add "
+                f"`{core}_backend: str` to Settings to say which one this application uses"
+            )
+
+    def test_every_backend_setting_defaults_to_a_real_package(self) -> None:
+        available = conventions.techs(INFRASTRUCTURE_PACKAGE)
+        for name, field in Settings.model_fields.items():
+            if not name.endswith("_backend"):
+                continue
+            assert field.default in available, (
+                f"Settings.{name} defaults to '{field.default}', which is not a subpackage "
+                f"of src/app/infrastructure/. Available: {', '.join(available)}"
+            )
+
+
+class TestEdgeLookups:
+    """An edge may resolve use cases, and only use cases.
+
+    The composition module is exempt: naming what an edge may not is its job.
+    """
+
+    @staticmethod
+    def use_case_names() -> set[str]:
+        return {
+            name
+            for path in modules(APPLICATION / "usecases")
+            for name in classes_in(path)
+            if name.endswith(conventions.USECASE_SUFFIX)
+        }
+
+    def test_an_edge_resolves_only_real_use_cases(self) -> None:
+        known = self.use_case_names()
+        for path in modules(PRESENTATION):
+            if path.is_relative_to(COMPOSITION):
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                if not isinstance(node.func, ast.Attribute) or node.func.attr != "get":
+                    continue
+                target = node.args[0]
+                # A dict lookup passes a string, not an identifier.
+                if not isinstance(target, ast.Name) or not target.id[:1].isupper():
+                    continue
+                assert target.id in known, (
+                    f"{path.name} resolves {target.id}, which is not a use case. An edge "
+                    f"may ask for use cases only; known: {', '.join(sorted(known))}"
+                )
