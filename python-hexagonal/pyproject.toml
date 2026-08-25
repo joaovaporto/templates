@@ -22,7 +22,9 @@ all = ["orjson>=3.10.0"]
 # The entrypoint lives in the composition root: starting the app means building its
 # object graph, which is the one thing presentation is not allowed to do.
 [project.scripts]
-app = "app.composition.main:main"
+app = "app.presentation.composition.main:main"
+# Prints which adapter each port resolves to under the current settings.
+app-explain = "app.presentation.composition.main:explain"
 
 [build-system]
 requires = ["hatchling"]
@@ -44,15 +46,17 @@ dev = [
 
 # --- The dependency rule, machine-checked. An unenforced architecture decays. --------
 #
-# domain         -> nothing (not even a third-party runtime dependency)
-# application    -> domain
-# infrastructure -> application, domain
-# presentation   -> application, domain          (NOT infrastructure)
-# composition    -> everything; the only place that may, and not a layer.
+# domain                    -> nothing (not even a third-party runtime dependency)
+# application               -> domain
+# infrastructure            -> application, domain
+# presentation              -> application, domain          (NOT infrastructure)
+# presentation.composition  -> everything; the wiring, and the one exception below.
 #
-# `presentation` and `infrastructure` are independent siblings: neither may import the
-# other. That is what forces adapter selection out of the presentation modules and into
-# the composition root, so a presentation module can never name a concrete adapter.
+# Presentation is the system's entry point, so the composition root lives inside it — as
+# one module, not spread through it. Everything else in `presentation` is still barred
+# from `infrastructure`: an edge may hold the resolver and ask it for a use case, but may
+# never name the adapter behind one. Only `presentation.composition` may, which is what
+# the ignored import below states.
 [tool.importlinter]
 root_package = "app"
 include_external_packages = true
@@ -65,7 +69,6 @@ forbidden_modules = [
     "app.application",
     "app.infrastructure",
     "app.presentation",
-    "app.composition",
 ]
 
 [[tool.importlinter.contracts]]
@@ -75,7 +78,6 @@ source_modules = ["app.application"]
 forbidden_modules = [
     "app.infrastructure",
     "app.presentation",
-    "app.composition",
 ]
 
 [[tool.importlinter.contracts]]
@@ -84,17 +86,16 @@ type = "forbidden"
 source_modules = ["app.infrastructure"]
 forbidden_modules = [
     "app.presentation",
-    "app.composition",
 ]
 
 [[tool.importlinter.contracts]]
-name = "Presentation depends only on application and domain"
+name = "Presentation never names an adapter, except when wiring"
 type = "forbidden"
 source_modules = ["app.presentation"]
-forbidden_modules = [
-    "app.infrastructure",
-    "app.composition",
-]
+forbidden_modules = ["app.infrastructure"]
+# The composition module is the one place allowed to know a concrete adapter; that is its
+# whole job. Every other presentation module remains barred, directly or through a chain.
+ignore_imports = ["app.presentation.composition.* -> app.infrastructure.*"]
 
 [[tool.importlinter.contracts]]
 name = "Domain is pure Python"

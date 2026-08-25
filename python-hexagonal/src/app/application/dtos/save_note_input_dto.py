@@ -4,7 +4,7 @@ from app.domain.entities.note import Note
 from app.domain.value_objects.title import Title
 
 
-class SaveNoteInput(BaseModel):
+class SaveNoteInputDto(BaseModel):
     """One note, travelling toward the core.
 
     This DTO is the use case's precondition made into a type: it validates on

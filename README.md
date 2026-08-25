@@ -7,7 +7,7 @@ starting point — copy it out, rename, and go.
 
 | Template | For | Highlights |
 |----------|-----|-----------|
-| [`python-hexagonal/`](python-hexagonal/) | Python projects | Hexagonal architecture with the dependency rule **machine-enforced** (import-linter + in-suite architecture tests), a typed composition root for DI, and clean `uv` dependency tiers (core / extras / dev). Ships a `CLAUDE.md` aligned with my global conventions. |
+| [`python-hexagonal/`](python-hexagonal/) | Python projects | Hexagonal architecture with the dependency rule **machine-enforced** (import-linter + in-suite architecture tests), a **convention-driven composition root** (a new use case costs zero wiring; adapters are selected by settings, and the test suite builds every use case on every backend), and clean `uv` dependency tiers (core / extras / dev). Ships a `CLAUDE.md` aligned with my global conventions. |
 
 ## Using a template
 

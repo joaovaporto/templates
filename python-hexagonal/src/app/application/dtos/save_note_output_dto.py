@@ -9,7 +9,7 @@ class SaveOutcome(StrEnum):
     FAILED = "failed"
 
 
-class SaveNoteOutput(BaseModel):
+class SaveNoteOutputDto(BaseModel):
     """The result of a save, travelling away from the core.
 
     The use case never raises to report a routine outcome; it returns one of these.
@@ -23,13 +23,13 @@ class SaveNoteOutput(BaseModel):
     detail: str = ""
 
     @classmethod
-    def created(cls, key: str) -> "SaveNoteOutput":
+    def created(cls, key: str) -> "SaveNoteOutputDto":
         return cls(key=key, outcome=SaveOutcome.CREATED)
 
     @classmethod
-    def updated(cls, key: str) -> "SaveNoteOutput":
+    def updated(cls, key: str) -> "SaveNoteOutputDto":
         return cls(key=key, outcome=SaveOutcome.UPDATED)
 
     @classmethod
-    def failed(cls, key: str, detail: str) -> "SaveNoteOutput":
+    def failed(cls, key: str, detail: str) -> "SaveNoteOutputDto":
         return cls(key=key, outcome=SaveOutcome.FAILED, detail=detail)

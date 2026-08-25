@@ -1,17 +1,16 @@
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
-BACKEND_MEMORY = "memory"
-BACKEND_JSONFILE = "jsonfile"
-BACKENDS = (BACKEND_MEMORY, BACKEND_JSONFILE)
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """The edge's configuration, read from the environment / .env.
 
-    Presentation owns settings; the composition root reads them to choose adapters. Note
-    what selects the backend: a *name* (`APP_REPOSITORY_BACKEND`), not an import. An
-    unknown name is rejected by the container at startup, not defaulted silently.
+    Two conventions connect a name here to a class under `infrastructure/`:
+
+        <port>_backend    names the subpackage implementing that port, and is needed only
+                          once a port has more than one implementation.
+        <backend>_<arg>   supplies one constructor argument of that backend's adapters.
     """
 
     model_config = SettingsConfigDict(
@@ -22,6 +21,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    repository_backend: str = Field(default=BACKEND_MEMORY)
-    jsonfile_path: str = Field(default="notes.json")
-    debug: bool = Field(default=False)
+    note_repository_backend: str = "memory"
+    jsonfile_path: Path = Path("notes.json")
+    debug: bool = False
