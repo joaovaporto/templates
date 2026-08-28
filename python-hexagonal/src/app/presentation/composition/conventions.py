@@ -49,6 +49,16 @@ def backend_field(port: type) -> str:
     return f"{core_of(port)}{BACKEND_SUFFIX}"
 
 
+def arg_prefixes(core: str, tech: str) -> tuple[str, ...]:
+    """The settings prefixes an adapter's arguments may use, most specific first.
+
+    The plain backend name is the norm, so one `postgres_dsn` feeds every Postgres
+    adapter. Scoping to the core is for the exception: one backend implementing two
+    ports whose adapters take an argument of the same name.
+    """
+    return (f"{core}_{tech}", tech)
+
+
 def field_value(settings: BaseSettings, field: str) -> Any:
     if field not in type(settings).model_fields:
         return MISSING

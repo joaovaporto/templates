@@ -51,11 +51,18 @@ parameter. Nothing is registered, so **adding a use case costs no wiring at all*
 | backend | settings field `<core>_backend`, whose value is a subpackage of `infrastructure/` | `APP_NOTE_REPOSITORY_BACKEND=jsonfile` |
 | module | in that subpackage, the one stem ending `_<core>_adapter` | `jsonfile/orjson_note_repository_adapter.py` |
 | class | the one `*Adapter` class in that module | `OrjsonNoteRepositoryAdapter` |
+| arguments | non-port parameters read `<backend>_<param>` from settings | `path: Path` ← `APP_JSONFILE_PATH` |
 
 A port lives directly in `application/ports/` and an adapter directly in
 `infrastructure/<backend>/` — resolution lists one directory rather than walking a tree, so
 the depth is itself a checked rule.
-| arguments | non-port parameters read `<backend>_<param>` from settings | `path: Path` ← `APP_JSONFILE_PATH` |
+
+Naming an argument after the backend is what lets every Postgres adapter share one
+`APP_POSTGRES_DSN`. When that is too coarse — one backend implementing two ports whose
+adapters both take `path` — scope the argument to its port as
+`<core>_<backend>_<param>` (`APP_NOTE_REPOSITORY_JSONFILE_PATH`), which is read in
+preference to the plain field. Declaring the scoped field is what selects it, so it wins
+even when left at its default.
 
 Adapters are found by **module stem**, never by class name, so an adapter may keep the
 name of the library it wraps. A port with a single implementation needs no settings field;
@@ -89,6 +96,45 @@ management is not its job**. A pool shared by every Postgres adapter belongs in
 `infrastructure/`, resolved inside that layer, so the use case and the edge never hear of
 one; connection handling that is genuinely the edge's concern belongs in `presentation/`.
 That is why no resolution call takes a session and why there is no scope machinery.
+
+## DTOs carry invariants
+
+A use case trusts what it is handed. **An input DTO is its precondition made into a type**:
+constructing one is what proves the use case may run, so the use case reads every field
+without checking presence, emptiness, or range.
+
+```python
+class SaveNoteInputDto(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key: str
+    body: str
+
+    @field_validator("key", "body")
+    @classmethod
+    def _must_be_present(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
+
+class SaveNoteUseCase:
+    def execute(self, request: SaveNoteInputDto) -> SaveNoteOutputDto:
+        note = request.to_note()   # no checks: an invalid request could not exist
+```
+
+Bad data is rejected where the DTO is built, at the edge, and never reaches the core —
+the use case is correct because of what the type made impossible, not because it defends
+itself. `BaseModel` makes construction validate, `frozen=True` stops the proof being
+invalidated afterwards, and `extra="forbid"` keeps an unvalidated field from riding along.
+`tests/architecture/test_naming_conventions.py` checks all three, that each file holds one
+`*Dto` class, and that **no use case raises a validation error** — re-validating means the
+DTO has stopped being proof.
+
+An input DTO that builds an entity owes that entity's invariants: `to_note()` cannot fail
+only because the DTO validates the same `key` and `body` that `Note` does, so changing an
+entity's invariants means revisiting the DTOs that build it. Output DTOs share the
+structural rules but carry no precondition — they are evidence, not permission.
 
 ## The dependency rule (enforced by `make arch`)
 

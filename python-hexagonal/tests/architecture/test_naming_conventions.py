@@ -6,9 +6,11 @@ enforces is a comment.
 """
 
 import ast
+import importlib
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from app.presentation.composition import conventions
 from app.presentation.settings import Settings
@@ -24,6 +26,8 @@ PRESENTATION = SRC / "presentation"
 COMPOSITION = PRESENTATION / "composition"
 
 INFRASTRUCTURE_PACKAGE = "app.infrastructure"
+DTOS = APPLICATION / "dtos"
+DTO_PACKAGE = "app.application.dtos"
 
 
 def modules(root: Path) -> list[Path]:
@@ -33,6 +37,36 @@ def modules(root: Path) -> list[Path]:
 def classes_in(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return [n.name for n in tree.body if isinstance(n, ast.ClassDef)]
+
+
+def dto_classes(path: Path) -> list[type]:
+    """The `*Dto` classes a module defines, imported so `model_config` is the effective one.
+
+    Read from the class rather than the source because a DTO may inherit its config from a
+    shared base, which an AST check of one file would miss.
+    """
+    module = importlib.import_module(f"{DTO_PACKAGE}.{path.stem}")
+    return [
+        value
+        for value in vars(module).values()
+        if isinstance(value, type)
+        and value.__module__ == module.__name__
+        and value.__name__.endswith("Dto")
+    ]
+
+
+def raised_names(source: str) -> list[str]:
+    """The exception names a module raises, by their final identifier."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        exception = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+        if isinstance(exception, ast.Name):
+            found.append(exception.id)
+        elif isinstance(exception, ast.Attribute):
+            found.append(exception.attr)
+    return found
 
 
 class TestPorts:
@@ -71,12 +105,97 @@ class TestAdapters:
 
 
 class TestDtos:
+    """A DTO carries proven invariants, so a use case can trust what it is handed.
+
+    The rules below are the structural half of that contract — construction validates, and
+    nothing can undo or bypass the validation afterwards. Whether a field needs a rule
+    beyond its type is a domain judgement, so no test demands a validator.
+    """
+
     def test_every_dto_declares_its_direction(self) -> None:
-        for path in modules(APPLICATION / "dtos"):
+        for path in modules(DTOS):
             assert path.stem.endswith(("_input_dto", "_output_dto")), (
                 f"{path.name} must end with '_input_dto' (toward the core) or "
                 f"'_output_dto' (away from it)"
             )
+
+    def test_every_dto_validates_on_construction(self) -> None:
+        for path in modules(DTOS):
+            for dto in dto_classes(path):
+                assert issubclass(dto, BaseModel), (
+                    f"{path.name}: {dto.__name__} must be a pydantic BaseModel, so building "
+                    f"it validates. A dataclass or TypedDict carries data, not proof."
+                )
+
+    def test_every_dto_is_frozen(self) -> None:
+        for path in modules(DTOS):
+            for dto in dto_classes(path):
+                config = getattr(dto, "model_config", {})
+                assert config.get("frozen") is True, (
+                    f"{path.name}: {dto.__name__} must set frozen=True, so proof established "
+                    f"at construction cannot be invalidated by a later assignment"
+                )
+
+    def test_every_dto_forbids_undeclared_fields(self) -> None:
+        for path in modules(DTOS):
+            for dto in dto_classes(path):
+                config = getattr(dto, "model_config", {})
+                assert config.get("extra") == "forbid", (
+                    f"{path.name}: {dto.__name__} must set extra='forbid', so no undeclared "
+                    f"field rides along unvalidated"
+                )
+
+    def test_each_dto_module_defines_exactly_one_dto(self) -> None:
+        """Supporting types may share the file; only `*Dto` classes are counted."""
+        for path in modules(DTOS):
+            found = [c for c in classes_in(path) if c.endswith("Dto")]
+            assert len(found) == 1, f"{path.name} must define one *Dto class, found {found}"
+
+
+# A use case that catches a validation error without raising one is still trusting its
+# input; only raising is the smell. The fixtures pin both halves of that distinction.
+CATCHES_A_VALIDATION_ERROR = """
+def execute(self, request):
+    try:
+        return self._store(request.to_note())
+    except DomainValidationError as e:
+        return Output.failed(str(e))
+"""
+
+RAISES_A_VALIDATION_ERROR = """
+def execute(self, request):
+    if not request.key:
+        raise DomainValidationError("A note needs a key.")
+"""
+
+
+class TestUseCasesTrustTheirInput:
+    """A use case receives proof, not data to check.
+
+    An input DTO cannot be built unless the business rules hold, so a use case that
+    re-validates has turned that proof back into a bag of fields. This is the half of the
+    DTO contract that decays in practice, so it is the half worth a test.
+    """
+
+    def test_no_use_case_raises_a_validation_error(self) -> None:
+        for path in modules(APPLICATION / "usecases"):
+            source = path.read_text(encoding="utf-8")
+            offenders = [n for n in raised_names(source) if n.endswith("ValidationError")]
+            assert not offenders, (
+                f"{path.name} raises {', '.join(offenders)}. A use case receives proof, not "
+                f"data to check: put the rule in the input DTO, which then cannot be built "
+                f"without it"
+            )
+
+    def test_catching_a_validation_error_is_allowed(self) -> None:
+        assert not [
+            n for n in raised_names(CATCHES_A_VALIDATION_ERROR) if n.endswith("ValidationError")
+        ]
+
+    def test_raising_one_is_what_the_rule_catches(self) -> None:
+        assert [
+            n for n in raised_names(RAISES_A_VALIDATION_ERROR) if n.endswith("ValidationError")
+        ] == ["DomainValidationError"]
 
 
 class TestUseCases:

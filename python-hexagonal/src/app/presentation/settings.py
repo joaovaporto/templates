@@ -11,6 +11,11 @@ class Settings(BaseSettings):
         <port>_backend    names the subpackage implementing that port, and is needed only
                           once a port has more than one implementation.
         <backend>_<arg>   supplies one constructor argument of that backend's adapters.
+
+    When one backend implements two ports whose adapters take an argument of the same
+    name, scope that argument to its port as `<port>_<backend>_<arg>`, which is read in
+    preference to the plain form. Declaring it is what selects it, so the plain field
+    stops feeding that adapter even if the scoped one is left at its default.
     """
 
     model_config = SettingsConfigDict(

@@ -35,6 +35,7 @@ htmlcov/
 .vscode/
 *.swp
 .DS_Store
+*~
 
 # Example data written by the JSON-file adapter demo
 notes.json
