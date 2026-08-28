@@ -67,6 +67,39 @@ All of the above is checked by `make arch` (import-linter) and by the tests unde
 
 `tests/architecture/test_naming_conventions.py` enforces these. Breaking one fails CI.
 
+## DTOs carry invariants — the use case trusts what it is handed
+
+**An input DTO is a use case's precondition made into a type.** Constructing one is what
+proves the use case may run, so a use case **never** checks presence, emptiness, or range:
+it reads every field directly, because it cannot have been handed anything else. Data that
+violates a business rule is rejected where the DTO is built — at the edge, by pydantic —
+and never reaches the core. This is negative-space programming: the use case is correct
+because of what the type has already made impossible, not because it defends itself.
+
+What makes the proof durable, and what the suite checks:
+
+- A DTO is a **pydantic `BaseModel`**, so construction validates. Never a plain dataclass,
+  `TypedDict`, or `NamedTuple` — those carry data, not proof.
+- **`frozen=True`**: proof established at construction cannot be invalidated by a later
+  assignment.
+- **`extra="forbid"`**: no undeclared field rides along unvalidated.
+- **One `*Dto` class per file** (supporting types like an enum may share the file).
+- **No module under `application/usecases/` raises a validation error.** The moment a use
+  case re-validates, the DTO has stopped being proof and become a bag of fields. Catching
+  one a collaborator raised is fine; raising one is the smell.
+
+**An input DTO that builds an entity owes that entity's invariants.** `to_note()` is
+annotated *"Total: the invariants already hold, so this cannot fail"*, and that is true
+only because `SaveNoteInputDto` validates the same `key` and `body` that
+`Note.__post_init__` does. That duplication is load-bearing: **add an invariant to an
+entity and you must revisit the DTOs that build it**, or a "cannot fail" conversion
+quietly starts failing. Output DTOs share the structural rules above but carry no
+precondition — they are evidence, not permission.
+
+Whether a given field needs a constraint beyond its type is a domain judgement, so the
+suite does not demand a validator on every DTO. It enforces the structure; you supply the
+rules.
+
 ## Wiring — the composition root
 
 - Use cases receive their collaborators as **ports through the constructor**. They never

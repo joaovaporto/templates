@@ -97,6 +97,45 @@ management is not its job**. A pool shared by every Postgres adapter belongs in
 one; connection handling that is genuinely the edge's concern belongs in `presentation/`.
 That is why no resolution call takes a session and why there is no scope machinery.
 
+## DTOs carry invariants
+
+A use case trusts what it is handed. **An input DTO is its precondition made into a type**:
+constructing one is what proves the use case may run, so the use case reads every field
+without checking presence, emptiness, or range.
+
+```python
+class SaveNoteInputDto(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key: str
+    body: str
+
+    @field_validator("key", "body")
+    @classmethod
+    def _must_be_present(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
+
+class SaveNoteUseCase:
+    def execute(self, request: SaveNoteInputDto) -> SaveNoteOutputDto:
+        note = request.to_note()   # no checks: an invalid request could not exist
+```
+
+Bad data is rejected where the DTO is built, at the edge, and never reaches the core —
+the use case is correct because of what the type made impossible, not because it defends
+itself. `BaseModel` makes construction validate, `frozen=True` stops the proof being
+invalidated afterwards, and `extra="forbid"` keeps an unvalidated field from riding along.
+`tests/architecture/test_naming_conventions.py` checks all three, that each file holds one
+`*Dto` class, and that **no use case raises a validation error** — re-validating means the
+DTO has stopped being proof.
+
+An input DTO that builds an entity owes that entity's invariants: `to_note()` cannot fail
+only because the DTO validates the same `key` and `body` that `Note` does, so changing an
+entity's invariants means revisiting the DTOs that build it. Output DTOs share the
+structural rules but carry no precondition — they are evidence, not permission.
+
 ## The dependency rule (enforced by `make arch`)
 
 Imports flow inward only. `domain` → nothing; `application` → `domain`; `infrastructure`
