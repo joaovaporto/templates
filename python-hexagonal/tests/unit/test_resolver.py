@@ -47,6 +47,22 @@ class NeedsLimitUseCase:
         self.limit = limit
 
 
+class AlphaRepositoryPort(Protocol):
+    path: Path
+
+
+class BetaRepositoryPort(Protocol):
+    path: Path
+
+
+class NeedsBothUseCase:
+    """Two ports served by `tests/infrastructure/dual/`, whose adapters both take `path`."""
+
+    def __init__(self, alpha: AlphaRepositoryPort, beta: BetaRepositoryPort) -> None:
+        self.alpha = alpha
+        self.beta = beta
+
+
 class PingUseCase:
     def __init__(self, pong: "PongUseCase") -> None:
         self.pong = pong
@@ -86,6 +102,81 @@ class TestResolution:
         resolver = Resolver(settings(note_repository_backend="jsonfile", jsonfile_path=path))
         resolver.get(SaveNoteUseCase).execute(SaveNoteInputDto(key="a", title="A", body="b"))
         assert path.exists()
+
+
+# --- Arguments scoped to a port ----------------------------------------------------
+
+
+class ScopedSettings(BaseSettings):
+    """Declares the scoped field only; there is no `jsonfile_path` to fall back to."""
+
+    model_config = SettingsConfigDict(env_prefix="APP_")
+
+    note_repository_backend: str = "jsonfile"
+    note_repository_jsonfile_path: Path = Path("notes.json")
+
+
+class BothSettings(ScopedSettings):
+    """Declares both forms, with the scoped one left at its default."""
+
+    note_repository_jsonfile_path: Path = Path("scoped-default.json")
+    jsonfile_path: Path = Path("plain.json")
+
+
+class MistypedSettings(BaseSettings):
+    """Both forms declared, the scoped one mistyped, so the message must name that one."""
+
+    model_config = SettingsConfigDict(env_prefix="APP_")
+
+    note_repository_backend: str = "jsonfile"
+    note_repository_jsonfile_path: int = 3
+    jsonfile_path: Path = Path("plain.json")
+
+
+class DualSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_")
+
+    alpha_repository_dual_path: Path = Path("alpha.json")
+    beta_repository_dual_path: Path = Path("beta.json")
+
+
+class BareDualSettings(BaseSettings):
+    """Neither form declared, so `dual`'s adapters cannot be supplied at all."""
+
+    model_config = SettingsConfigDict(env_prefix="APP_")
+
+
+class DualResolver[SettingsT: BaseSettings](Resolver[SettingsT]):
+    package = "tests"
+
+
+class TestScopedArguments:
+    def test_a_scoped_field_supplies_an_adapter_argument(self, tmp_path: Path) -> None:
+        path = tmp_path / "scoped.json"
+        resolver = Resolver(ScopedSettings(note_repository_jsonfile_path=path))
+
+        resolver.get(SaveNoteUseCase).execute(SaveNoteInputDto(key="a", title="A", body="b"))
+
+        assert path.exists()
+
+    def test_a_declared_scoped_field_wins_even_at_its_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Declaration selects the field, not the value it holds."""
+        monkeypatch.chdir(tmp_path)
+        resolver = Resolver(BothSettings(jsonfile_path=tmp_path / "plain.json"))
+
+        resolver.get(SaveNoteUseCase).execute(SaveNoteInputDto(key="a", title="A", body="b"))
+
+        assert (tmp_path / "scoped-default.json").exists()
+        assert not (tmp_path / "plain.json").exists(), "the plain field no longer feeds it"
+
+    def test_two_ports_of_one_backend_read_their_own_fields(self) -> None:
+        resolver = DualResolver(DualSettings())
+        use_case = resolver.get(NeedsBothUseCase)
+
+        assert use_case.alpha.path == Path("alpha.json")
+        assert use_case.beta.path == Path("beta.json")
 
 
 # --- Providers as overrides --------------------------------------------------------
@@ -173,6 +264,24 @@ class TestFailures:
         message = str(caught.value)
         assert "NeedsLimitUseCase(limit: int)" in message
         assert "APP_NEEDS_LIMIT_LIMIT" in message
+
+    def test_an_unsuppliable_adapter_argument_offers_both_forms(self) -> None:
+        with pytest.raises(ConfigurationError) as caught:
+            DualResolver(BareDualSettings()).get(NeedsBothUseCase)
+
+        message = str(caught.value)
+        assert "AlphaRepositoryAdapter(path: Path)" in message
+        assert "`dual_path: Path`" in message
+        assert "APP_DUAL_PATH" in message
+        assert "`alpha_repository_dual_path`" in message
+
+    def test_a_type_mismatch_names_the_field_that_was_read(self) -> None:
+        with pytest.raises(ConfigurationError) as caught:
+            Resolver(MistypedSettings()).get(SaveNoteUseCase)
+
+        message = str(caught.value)
+        assert "Settings.note_repository_jsonfile_path is a int" in message
+        assert "Settings.jsonfile_path" not in message, "the unread candidate is not the fix"
 
     def test_a_cycle_is_named_rather_than_overflowing_the_stack(self) -> None:
         with pytest.raises(ConfigurationError) as caught:

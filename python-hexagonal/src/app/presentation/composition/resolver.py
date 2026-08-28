@@ -100,9 +100,10 @@ class Resolver[SettingsT: BaseSettings]:
         tech, module = conventions.choose_adapter(
             self.settings, port, f"{self.package}.infrastructure"
         )
-        return self._construct(conventions.load_adapter(module), tech)
+        prefixes = conventions.arg_prefixes(conventions.core_of(port), tech)
+        return self._construct(conventions.load_adapter(module), *prefixes)
 
-    def _construct(self, cls: type, prefix: str) -> Any:
+    def _construct(self, cls: type, *prefixes: str) -> Any:
         try:
             # eval_str resolves string and forward-referenced annotations against the
             # module that declared the constructor.
@@ -117,20 +118,19 @@ class Resolver[SettingsT: BaseSettings]:
             if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
                 continue
             hint = MISSING if parameter.annotation is parameter.empty else parameter.annotation
-            value = self._argument(cls, name, hint, prefix)
+            value = self._argument(cls, name, hint, prefixes)
             if value is MISSING:
                 if parameter.default is not parameter.empty:
                     continue
-                raise ConfigurationError(self._unsuppliable(cls, name, hint, prefix))
+                raise ConfigurationError(self._unsuppliable(cls, name, hint, prefixes))
             kwargs[name] = value
         return cls(**kwargs)
 
-    def _argument(self, cls: type, name: str, hint: Any, prefix: str) -> Any:
+    def _argument(self, cls: type, name: str, hint: Any, prefixes: tuple[str, ...]) -> Any:
         if hint is not MISSING and self._is_resolvable(hint):
             return self._resolve(hint)
 
-        field = f"{prefix}_{name}"
-        value = conventions.field_value(self.settings, field)
+        field, value = self._from_settings(name, prefixes)
         if value is not MISSING and isinstance(hint, type) and not isinstance(value, hint):
             raise ConfigurationError(
                 f"Settings.{field} is a {type(value).__name__}, but "
@@ -138,6 +138,19 @@ class Resolver[SettingsT: BaseSettings]:
                 f"the settings field as {hint.__name__} and let pydantic do the conversion."
             )
         return value
+
+    def _from_settings(self, name: str, prefixes: tuple[str, ...]) -> tuple[str, Any]:
+        """The first field the settings model declares, most specific prefix first.
+
+        Declaring the field is what selects it, not the value it holds, so which field
+        feeds an adapter can be read off `Settings` without the environment in hand.
+        """
+        for prefix in prefixes:
+            field = f"{prefix}_{name}"
+            value = conventions.field_value(self.settings, field)
+            if value is not MISSING:
+                return field, value
+        return f"{prefixes[-1]}_{name}", MISSING
 
     # --- Predicates ----------------------------------------------------------------
 
@@ -152,13 +165,19 @@ class Resolver[SettingsT: BaseSettings]:
         data = (f"{self.package}.domain.", f"{self.package}.application.dtos.")
         return not hint.__module__.startswith(data)
 
-    def _unsuppliable(self, cls: type, name: str, hint: Any, prefix: str) -> str:
+    def _unsuppliable(self, cls: type, name: str, hint: Any, prefixes: tuple[str, ...]) -> str:
         shown = getattr(hint, "__name__", "an unannotated parameter" if hint is MISSING else hint)
-        field = f"{prefix}_{name}"
+        field = f"{prefixes[-1]}_{name}"
+        scoped = (
+            f" Name it `{prefixes[0]}_{name}` instead to keep it apart from another port's "
+            f"adapter in the same backend."
+            if len(prefixes) > 1
+            else ""
+        )
         return (
             f"Cannot supply {cls.__name__}({name}: {shown}). Add `{field}: {shown}` to "
             f"Settings (env {conventions.env_var(self.settings, field)}), give the parameter a "
-            f"default, or add a @provider for {cls.__name__}."
+            f"default, or add a @provider for {cls.__name__}.{scoped}"
         )
 
     # --- Introspection -------------------------------------------------------------

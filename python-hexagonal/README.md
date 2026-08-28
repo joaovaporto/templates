@@ -51,11 +51,18 @@ parameter. Nothing is registered, so **adding a use case costs no wiring at all*
 | backend | settings field `<core>_backend`, whose value is a subpackage of `infrastructure/` | `APP_NOTE_REPOSITORY_BACKEND=jsonfile` |
 | module | in that subpackage, the one stem ending `_<core>_adapter` | `jsonfile/orjson_note_repository_adapter.py` |
 | class | the one `*Adapter` class in that module | `OrjsonNoteRepositoryAdapter` |
+| arguments | non-port parameters read `<backend>_<param>` from settings | `path: Path` ← `APP_JSONFILE_PATH` |
 
 A port lives directly in `application/ports/` and an adapter directly in
 `infrastructure/<backend>/` — resolution lists one directory rather than walking a tree, so
 the depth is itself a checked rule.
-| arguments | non-port parameters read `<backend>_<param>` from settings | `path: Path` ← `APP_JSONFILE_PATH` |
+
+Naming an argument after the backend is what lets every Postgres adapter share one
+`APP_POSTGRES_DSN`. When that is too coarse — one backend implementing two ports whose
+adapters both take `path` — scope the argument to its port as
+`<core>_<backend>_<param>` (`APP_NOTE_REPOSITORY_JSONFILE_PATH`), which is read in
+preference to the plain field. Declaring the scoped field is what selects it, so it wins
+even when left at its default.
 
 Adapters are found by **module stem**, never by class name, so an adapter may keep the
 name of the library it wraps. A port with a single implementation needs no settings field;

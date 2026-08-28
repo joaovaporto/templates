@@ -87,13 +87,14 @@ All of the above is checked by `make arch` (import-linter) and by the tests unde
   | backend | settings field `<core>_backend` = a subpackage of `infrastructure/` | `APP_NOTE_REPOSITORY_BACKEND=jsonfile` |
   | module | in that subpackage, the one stem ending `_<core>_adapter` | `jsonfile/orjson_note_repository_adapter.py` |
   | class | the one `*Adapter` class in that module | `OrjsonNoteRepositoryAdapter` |
+  | arguments | non-port parameters read `<backend>_<param>` from settings | `path: Path` ← `APP_JSONFILE_PATH` |
+  | scoped argument | when one backend serves two ports, `<core>_<backend>_<param>` wins over the plain field | `APP_NOTE_REPOSITORY_JSONFILE_PATH` |
 
   **The tree is flat where resolution looks.** A port lives directly in
   `application/ports/`, and an adapter directly in `infrastructure/<backend>/` — one level
   down and no deeper. Resolution lists a single directory rather than walking a tree, so
   anything nested is invisible to it; `test_naming_conventions.py` fails on nesting rather
   than letting it fail silently at runtime.
-  | arguments | non-port parameters read `<backend>_<param>` from settings | `path: Path` ← `APP_JSONFILE_PATH` |
 
 - **Adding an adapter costs one file**: `infrastructure/<backend>/<library>_<core>_adapter.py`
   with one `*Adapter` class. It is found by the module's *stem*, so the class keeps the
@@ -111,6 +112,14 @@ All of the above is checked by `make arch` (import-linter) and by the tests unde
      `presentation/` and takes explicit values, so
      `Settings(postgres_pool_size=workers() * 2)` feeds `PostgresNoteRepositoryAdapter(pool_size: int)`
      by the ordinary `<backend>_<param>` rule. **No provider.**
+
+     *An argument is named after the backend, not the port*, so every Postgres adapter
+     shares one `postgres_dsn`. That is the point, and the default. Only when a single
+     backend implements two ports whose adapters take an argument of the same name does
+     the plain field become ambiguous — then name the field `<core>_<backend>_<param>`,
+     which the resolver reads in preference. **Declaring the scoped field is what selects
+     it**, not the value it holds, so it wins even left at its default and the plain field
+     stops feeding that adapter. Scope the one argument that collides, not the rest.
   2. *A live object* — an open pool, an HTTP client, a channel — cannot be a settings
      field. Give a `Resolver` subclass a constructor parameter for it and one `@provider`
      returning the port that uses it:
